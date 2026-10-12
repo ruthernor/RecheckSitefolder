@@ -1334,6 +1334,7 @@ h1{letter-spacing:-.01em;}
 
 /* --- Lamps: จุดสีกลมแบบ legend ในรูป --- */
 .lamp.go{background:var(--go);box-shadow:0 0 10px 1px rgba(187,244,81,.45);}
+.st-count{color:var(--go);font-weight:600;}
 .lamp.stop{background:var(--stop);box-shadow:0 0 10px 1px rgba(248,113,113,.4);}
 
 /* --- พรีวิวสถานีที่ขาดเอกสาร (TOR + ชื่อสถานี) ในการ์ด --- */
@@ -1395,7 +1396,7 @@ h1{letter-spacing:-.01em;}
     <div>
       <div class="eyebrow"><span class="dot"></span>RECHECK SITE FOLDER — RAILWAY / TELECOM</div>
       <h1>Recheck Site Folder Dashboard</h1>
-      <p class="subtitle">ค้นหาสถานี เพื่อดูสัดส่วนเอกสารตาม Checklist (TRUE/FALSE) เป็นกราฟแท่งและเปอร์เซ็นต์ — กรองด้วย Plan SAT, CM Indoor, ผู้รับเหมาติดตั้ง และทปษ./รฟท.ลงนามครบ</p>
+      <p class="subtitle">ค้นหาสถานี เพื่อดูสัดส่วนเอกสารตาม Checklist (TRUE/FALSE) เป็นกราฟแท่งและเปอร์เซ็นต์ — กรองด้วย Plan SAT, CM Indoor และผู้รับเหมาติดตั้ง</p>
     </div>
     <div class="signal-legend">
       <span><i class="lamp go"></i>TRUE = มีเอกสาร</span>
@@ -1451,18 +1452,6 @@ h1{letter-spacing:-.01em;}
     </div>
 
     <div class="filt-block">
-      <h2>Filter · ทปษ.ลงนามครบ</h2>
-      <p class="filt-desc">กรองตามสถานะการลงนามของ ทปษ. (คอลัมน์ AU)</p>
-      <div class="chip-row" id="signTpsChips"></div>
-    </div>
-
-    <div class="filt-block">
-      <h2>Filter · รฟท.ลงนามครบ</h2>
-      <p class="filt-desc">กรองตามสถานะการลงนามของ รฟท. (คอลัมน์ AV)</p>
-      <div class="chip-row" id="signSrtChips"></div>
-    </div>
-
-    <div class="filt-block">
       <h2>ค้นหาสถานี</h2>
       <p class="filt-desc">พิมพ์ชื่อสถานี ระบบจะค้นหาเฉพาะสถานีที่ผ่านตัวกรองด้านบน</p>
       <div class="search-wrap">
@@ -1480,7 +1469,7 @@ h1{letter-spacing:-.01em;}
   <section class="results-panel" id="resultsPanel">
     <div class="rp-empty" id="rpEmpty" style="display:none;">
       <div class="big">ไม่พบสถานีที่ตรงกับตัวกรอง</div>
-      <div class="sm">ลองปรับ Plan SAT, CM Indoor, Installation Subcon หรือการลงนามใหม่อีกครั้ง</div>
+      <div class="sm">ลองปรับ Plan SAT, CM Indoor, Installation Subcon หรือตัวกรองการลงนามใหม่อีกครั้ง</div>
     </div>
 
     <div id="rpContent">
@@ -1549,6 +1538,8 @@ h1{letter-spacing:-.01em;}
                 </div>
               </div>
             </div>
+            <select id="signTpsSel" class="st-sort" title="กรองตามการลงนามของ ทปษ."></select>
+            <select id="signSrtSel" class="st-sort" title="กรองตามการลงนามของ รฟท."></select>
             <select id="stationSort" class="st-sort">
               <option value="name">เรียง: ชื่อสถานี ก→ฮ</option>
               <option value="tor_asc">เรียง: เลข TOR น้อย → มาก</option>
@@ -2522,7 +2513,7 @@ h1{letter-spacing:-.01em;}
   }
 
   function renderCmChips(){
-    renderSignChips();
+    renderSignSelects();
     [['cmIndoor','cmIndoorChips']].forEach(([field, wrapId])=>{
       const wrap = document.getElementById(wrapId);
       const valOf = s => (s[field] && String(s[field]).trim()) || null;
@@ -2543,22 +2534,18 @@ h1{letter-spacing:-.01em;}
     });
   }
 
-  function renderSignChips(){
-    [['signTps','signTpsChips','sign_tps'],['signSrt','signSrtChips','sign_srt']].forEach(([field, wrapId, key])=>{
-      const wrap = document.getElementById(wrapId);
-      const triOf = s => s[key]===1 ? 'TRUE' : (s[key]===0 ? 'FALSE' : 'NULL');
-      const opts = [['ALL','ทั้งหมด'],['TRUE','ลงนามครบ'],['FALSE','ยังไม่ครบ'],['NULL','ไม่มีข้อมูล']];
-      wrap.innerHTML = opts.map(([v,label])=>{
-        const count = v==='ALL' ? STATIONS.length : STATIONS.filter(s=> triOf(s)===v).length;
-        return `<button class="chip ${state[field]===v?'active':''}" data-v="${v}">${label} <span style="opacity:.6">(${count})</span></button>`;
-      }).join('');
-      wrap.querySelectorAll('.chip').forEach(btn=>{
-        btn.addEventListener('click', ()=>{
-          state[field] = btn.dataset.v;
-          renderSignChips();
-          onFiltersChanged();
-        });
-      });
+  function renderSignSelects(){
+    [['signTps','signTpsSel','sign_tps','ทปษ.ลงนามครบ'],['signSrt','signSrtSel','sign_srt','รฟท.ลงนามครบ']].forEach(([field, selId, key, title])=>{
+      const sel = document.getElementById(selId);
+      if(!sel) return;
+      sel.innerHTML = [
+        ['ALL',   `${title}: ทั้งหมด`],
+        ['TRUE',  `${title}: ครบ`],
+        ['FALSE', `${title}: ยังไม่ครบ`],
+        ['NULL',  `${title}: ไม่มีข้อมูล`]
+      ].map(([v,l])=>`<option value="${v}">${l}</option>`).join('');
+      sel.value = state[field];
+      sel.onchange = ()=>{ state[field] = sel.value; onFiltersChanged(); };
     });
   }
 
@@ -2798,7 +2785,7 @@ h1{letter-spacing:-.01em;}
 
     if(list.length===0){
       document.getElementById('stationListTitle').innerHTML =
-        `<i class="lamp go" style="width:9px;height:9px;"></i>สถานีที่ผ่านตัวกรอง (0 แห่ง)`;
+        `<i class="lamp go" style="width:9px;height:9px;"></i>สถานีที่ผ่านตัวกรอง <span class="st-count">(0 แห่ง)</span>`;
       wrap.innerHTML = `<div class="st-list-empty">ไม่มีสถานีที่ผ่านตัวกรอง</div>`;
       return [];
     }
@@ -2844,7 +2831,7 @@ h1{letter-spacing:-.01em;}
     const pinnedLabel = showPinnedOnly ? ` · บอร์ด "${(activeBoard()||{}).name||''}"` : '';
     const isFiltered = pctFilterSel.size>0 || docFilterSel.size>0 || docGroupFilter!=='all' || showPinnedOnly;
     document.getElementById('stationListTitle').innerHTML =
-      `<i class="lamp go" style="width:9px;height:9px;"></i>สถานีที่ผ่านตัวกรอง (${fmt(enriched.length)}${isFiltered ? ' จาก '+fmt(list.length) : ''} แห่ง${escapeHtml(groupLabel)}${escapeHtml(docLabel)}${escapeHtml(pctLabel)}${escapeHtml(pinnedLabel)}) — กดเลือกเพื่อดูกราฟรายสถานี`;
+      `<i class="lamp go" style="width:9px;height:9px;"></i>สถานีที่ผ่านตัวกรอง <span class="st-count">(${fmt(enriched.length)}${isFiltered ? ' จาก '+fmt(list.length) : ''} แห่ง${escapeHtml(groupLabel)}${escapeHtml(docLabel)}${escapeHtml(pctLabel)}${escapeHtml(pinnedLabel)})</span> — กดเลือกเพื่อดูกราฟรายสถานี`;
 
     if(enriched.length===0){
       wrap.innerHTML = showPinnedOnly
