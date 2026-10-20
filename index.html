@@ -1381,6 +1381,7 @@ h1{letter-spacing:-.01em;}
 .insp-doc .id-stations, .ic-det .id-stations{display:flex;flex-wrap:wrap;gap:6px;padding:4px 12px 12px;}
 .insp-doc .id-st, .ic-det .id-st{font-family:inherit;font-size:12px;color:var(--text-1);background:var(--panel-2);border:1px solid var(--line);border-radius:999px;padding:3px 11px;cursor:pointer;}
 .insp-doc .id-st small, .ic-det .id-st small{color:var(--text-2);margin-left:4px;font-size:10.5px;}
+.insp-doc .id-st .id-tor, .ic-det .id-st .id-tor{margin:0 4px 0 0;color:var(--go);font-weight:600;font-size:10.5px;}
 .insp-doc .id-st:hover, .ic-det .id-st:hover{border-color:var(--focus);color:var(--text-0);}
 .insp-issue-head .ih-sum{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 2px;font-weight:400;}
 .insp-issue-head .ih-sum > span{font-size:12px;border-radius:999px;padding:3px 13px;border:1px solid var(--line);color:var(--text-1);}
@@ -3169,7 +3170,7 @@ h1{letter-spacing:-.01em;}
           <div class="id-stations">${r.stations.length ? r.stations.map(st=>{
             recheckFlat.push(st);
             const tor = (st.idx!==null && st.idx!==undefined) ? 'TOR '+escapeHtml(String(st.idx)) : '';
-            return `<button type="button" class="id-st" data-i="${recheckFlat.length-1}" title="${tor}">${escapeHtml(st.name||'-')}${cm(st)?` <small>${escapeHtml(cm(st))}</small>`:''}</button>`;
+            return `<button type="button" class="id-st" data-i="${recheckFlat.length-1}" title="${tor}"><small class="id-tor">TOR ${(st.idx!==null && st.idx!==undefined) ? escapeHtml(String(st.idx)) : '-'}</small> ${escapeHtml(st.name||'-')}${cm(st)?` <small>${escapeHtml(cm(st))}</small>`:''}</button>`;
           }).join('') : '<span class="ir-none" style="color:var(--text-2)">ไม่มีสถานี</span>'}</div>
         </details>`).join('')}
       </div>`;
@@ -3217,7 +3218,7 @@ h1{letter-spacing:-.01em;}
       const chips = g.stations.map(st=>{
         flat.push(st);
         const tor = (st.idx!==null && st.idx!==undefined) ? 'TOR '+escapeHtml(String(st.idx)) : '';
-        return `<button type="button" class="id-st" data-i="${flat.length-1}" title="${tor}">${escapeHtml(st.name||'-')}${cm(st)?` <small>${escapeHtml(cm(st))}</small>`:''}</button>`;
+        return `<button type="button" class="id-st" data-i="${flat.length-1}" title="${tor}"><small class="id-tor">TOR ${(st.idx!==null && st.idx!==undefined) ? escapeHtml(String(st.idx)) : '-'}</small> ${escapeHtml(st.name||'-')}${cm(st)?` <small>${escapeHtml(cm(st))}</small>`:''}</button>`;
       }).join('');
       return `<details class="insp-doc${g.wait?' is-wait':''}">
         <summary>
