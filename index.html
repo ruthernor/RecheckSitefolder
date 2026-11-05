@@ -1757,8 +1757,184 @@ h1{letter-spacing:-.01em;}
     }
     if(!boards.some(b=>b.id===activeBoardId)) activeBoardId = boards[0].id;
   }
-  function saveBoards(){
+  function saveBoardsLocal(){
     try{ localStorage.setItem(BOARD_STORAGE_KEY, JSON.stringify({boards, activeId:activeBoardId})); }catch(e){}
+  }
+  function saveBoards(){
+    saveBoardsLocal();
+    queuePinSync();
+  }
+
+  // ---------- บอร์ดร่วม: ซิงก์พิน/โน้ตกับผู้ใช้ทุกคนผ่าน Google Apps Script ----------
+  // หลักการ: เครื่องนี้เก็บ "สถานะล่าสุดที่ยืนยันกับเซิร์ฟเวอร์" (pinSynced) ไว้ แล้วเทียบกับบอร์ดปัจจุบัน
+  // ส่งเฉพาะส่วนที่เปลี่ยน (ops) ขึ้นไป เซิร์ฟเวอร์รวมให้แล้วส่งสถานะกลางกลับมา — ออฟไลน์ก็ใช้งานต่อได้ แล้วค่อยส่งทีหลัง
+  const PIN_SYNC_TOKEN = 'Nms6TXs3ddFNp6gfgAuemZj2';   // ต้องตรงกับ PIN_TOKEN ใน Apps Script
+  const PIN_SYNC_KEY   = 'recheckDashboard_pinSync_v1';
+  const PIN_POLL_MS    = 45 * 1000;
+  let pinSynced = null;      // { boardId: {name, created, items:{key:note}} } | null = ยังไม่เคยซิงก์
+  let pinRev = 0;
+  let pinInit = false, pinBusy = false, pinTimer = null;
+  let pinStatusEl = null;
+
+  function pinSyncUrl(){
+    let u = '';
+    try{ u = localStorage.getItem(GDRIVE_LS_KEY) || ''; }catch(e){}
+    return (u || GDRIVE_PROXY_DEFAULT || '').trim();
+  }
+  function pinSnapshot(list){
+    const m = {};
+    list.forEach(b=>{
+      const it = {};
+      Object.keys(b.items).forEach(k=>{ it[k] = String((b.items[k] && b.items[k].note) || ''); });
+      m[b.id] = {name:b.name, created:b.created, items:it};
+    });
+    return m;
+  }
+  function pinDiff(a, c){
+    const ops = [];
+    Object.keys(c).forEach(id=>{
+      const nb = c[id], ob = a[id];
+      if(!ob){
+        const items = {};
+        Object.keys(nb.items).forEach(k=>{ items[k] = {note:nb.items[k]}; });
+        ops.push({t:'addBoard', id, name:nb.name, created:nb.created, items});
+        return;
+      }
+      if(ob.name !== nb.name) ops.push({t:'rename', id, name:nb.name});
+      Object.keys(nb.items).forEach(k=>{
+        if(!(k in ob.items)) ops.push({t:'pin', b:id, k, note:nb.items[k]});
+        else if(ob.items[k] !== nb.items[k]) ops.push({t:'note', b:id, k, note:nb.items[k]});
+      });
+      Object.keys(ob.items).forEach(k=>{ if(!(k in nb.items)) ops.push({t:'unpin', b:id, k}); });
+    });
+    Object.keys(a).forEach(id=>{ if(!c[id]) ops.push({t:'delBoard', id}); });
+    return ops;
+  }
+  function applyOpLocal(list, op){
+    if(op.t === 'addBoard'){
+      if(!list.some(b=>b.id===op.id)){
+        const items = {};
+        Object.keys(op.items||{}).forEach(k=>{ items[k] = {note:String((op.items[k]&&op.items[k].note)||'')}; });
+        list.push({id:op.id, name:op.name, items, created:op.created||Date.now()});
+      }
+      return;
+    }
+    if(op.t === 'delBoard'){
+      const i = list.findIndex(b=>b.id===op.id);
+      if(i >= 0) list.splice(i, 1);
+      return;
+    }
+    const b = list.find(x=>x.id === (op.b || op.id));
+    if(!b) return;
+    if(op.t === 'rename') b.name = op.name;
+    else if(op.t === 'pin'){ if(!b.items[op.k]) b.items[op.k] = {note:String(op.note||'')}; }
+    else if(op.t === 'unpin') delete b.items[op.k];
+    else if(op.t === 'note') b.items[op.k] = {note:String(op.note||'')};
+  }
+
+  function setPinStatus(kind, msg){
+    if(!pinStatusEl) return;
+    if(kind === 'sync'){
+      pinStatusEl.textContent = '⟳ กำลังซิงก์บอร์ดร่วม...';
+      pinStatusEl.style.background = 'rgba(30,41,59,.88)';
+    }else if(kind === 'ok'){
+      const t = new Date().toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+      pinStatusEl.textContent = '☁ บอร์ดร่วม · ซิงก์ล่าสุด ' + t;
+      pinStatusEl.style.background = 'rgba(21,128,61,.9)';
+      pinStatusEl.title = 'พิน/โน้ตทุกคนเห็นตรงกัน — กดเพื่อซิงก์ทันที';
+    }else{
+      pinStatusEl.textContent = '⚠ ซิงก์บอร์ดไม่สำเร็จ — ข้อมูลยังอยู่ในเครื่อง (กดเพื่อลองใหม่)';
+      pinStatusEl.style.background = 'rgba(185,28,28,.92)';
+      pinStatusEl.title = String(msg||'');
+    }
+  }
+  function refreshPinUI(){
+    if(nmBoardId && !boards.some(b=>b.id===nmBoardId)) closeNoteModal();   // บอร์ดที่กำลังเขียนโน้ตถูกลบโดยคนอื่น
+    updatePinnedCount();
+    renderBoardBar();
+    renderStationHeadPins();
+    if(bpStation) renderBoardPickerList();
+    if(!selectedStation) renderResults();
+  }
+
+  function queuePinSync(){
+    if(!pinInit) return;
+    if(pinSynced && pinDiff(pinSynced, pinSnapshot(boards)).length === 0) return;
+    clearTimeout(pinTimer);
+    pinTimer = setTimeout(pinSync, 600);
+  }
+
+  async function pinSync(){
+    if(!pinInit || pinBusy) return;
+    const url = pinSyncUrl();
+    if(!url || !PIN_SYNC_TOKEN) return;
+    pinBusy = true;
+    setPinStatus('sync');
+    try{
+      const sent = pinSnapshot(boards);
+      const first = (pinSynced === null);
+      let ops;
+      if(first){
+        // ครั้งแรก: ส่งขึ้นเฉพาะบอร์ดที่มีหมุดอยู่ (บอร์ดว่างของเครื่องนี้ไม่ต้องส่ง ไม่งั้นทุกคนจะมีบอร์ดว่างซ้ำกัน)
+        const withPins = {};
+        Object.keys(sent).forEach(id=>{ if(Object.keys(sent[id].items).length) withPins[id] = sent[id]; });
+        ops = pinDiff({}, withPins);
+      }else{
+        ops = pinDiff(pinSynced, sent);
+      }
+      const res = await fetch(url, {
+        method:'POST', cache:'no-store',
+        headers:{'Content-Type':'text/plain;charset=utf-8'},
+        body: JSON.stringify({action:'sync', token:PIN_SYNC_TOKEN, rev: first ? -1 : pinRev, ops})
+      });
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      const json = await res.json();
+      if(!json.ok) throw new Error(json.error || 'sync failed');
+      pinRev = json.rev;
+      if(!json.unchanged){
+        const before = JSON.stringify(pinSnapshot(boards));
+        const inflight = pinDiff(sent, pinSnapshot(boards));      // สิ่งที่ผู้ใช้แก้ระหว่างรอเซิร์ฟเวอร์ตอบ
+        const next = (json.boards||[]).map(b=>{
+          const items = {};
+          Object.keys(b.items||{}).forEach(k=>{ items[k] = {note:String((b.items[k]&&b.items[k].note)||'')}; });
+          return {id:b.id, name:String(b.name||'บอร์ด'), items, created:b.created||Date.now()};
+        });
+        pinSynced = pinSnapshot(next);
+        inflight.forEach(op=>applyOpLocal(next, op));
+        if(!next.length) next.push(makeBoard('บอร์ดรวม'));          // เซิร์ฟเวอร์ว่าง: สร้างบอร์ดแรกให้
+        boards = next;
+        if(!boards.some(b=>b.id===activeBoardId)) activeBoardId = boards[0].id;
+        saveBoardsLocal();
+        if(JSON.stringify(pinSnapshot(boards)) !== before) refreshPinUI();
+      }else if(pinSynced === null){
+        pinSynced = pinSnapshot(boards);
+      }
+      try{ localStorage.setItem(PIN_SYNC_KEY, JSON.stringify({rev:pinRev, synced:pinSynced})); }catch(e){}
+      setPinStatus('ok');
+    }catch(err){
+      setPinStatus('err', err && err.message ? err.message : err);
+    }finally{
+      pinBusy = false;
+      if(pinSynced !== null && pinDiff(pinSynced, pinSnapshot(boards)).length) queuePinSync();
+    }
+  }
+
+  function initPinSync(){
+    try{
+      const d = JSON.parse(localStorage.getItem(PIN_SYNC_KEY) || 'null');
+      if(d && d.synced && typeof d.synced === 'object'){ pinSynced = d.synced; pinRev = d.rev || 0; }
+    }catch(e){}
+    if(!PIN_SYNC_TOKEN || !pinSyncUrl()) return;
+    pinStatusEl = document.createElement('div');
+    pinStatusEl.id = 'pinSyncBadge';
+    pinStatusEl.style.cssText = 'position:fixed;left:12px;bottom:12px;z-index:60;font-size:12px;line-height:1.3;padding:5px 12px;border-radius:999px;color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.25);cursor:pointer;max-width:80vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+    pinStatusEl.addEventListener('click', ()=>pinSync());
+    document.body.appendChild(pinStatusEl);
+    pinInit = true;
+    setInterval(()=>{ if(!document.hidden) pinSync(); }, PIN_POLL_MS);
+    document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) pinSync(); });
+    window.addEventListener('online', ()=>pinSync());
+    pinSync();
   }
   function activeBoard(){ return boards.find(b=>b.id===activeBoardId) || boards[0]; }
   function boardCount(b){ return b ? Object.keys(b.items).length : 0; }
@@ -2076,7 +2252,7 @@ h1{letter-spacing:-.01em;}
   // ---------- Google Drive auto-update (เปิดหน้า/รีเฟรช + ทุก 15 นาที) ----------
   // ไฟล์ใน Drive: RecheckSitefolder.xlsx (id 1Io9JJ3QnPEKmLAPg8qDZIVlj0uMfcZkH)
   // เบราว์เซอร์ดึงไฟล์ Drive ตรงๆ ไม่ได้ (CORS) จึงต้องผ่าน Google Apps Script ที่ส่งไฟล์กลับเป็น base64 JSON {data: "..."}
-  const GDRIVE_PROXY_DEFAULT = 'https://script.google.com/macros/s/AKfycbzNtygodw2cFF99WEE-SJciPlxMq4TD98oQd1qvHQ3YCR1HRTRjQHC349YKKTg7b4hyzA/exec';   // ใส่ URL ของ Apps Script (…/exec) ตรงนี้ หรือกรอกในช่อง "ตั้งค่า Google Drive" ด้านซ้าย
+  const GDRIVE_PROXY_DEFAULT = 'https://script.google.com/macros/s/AKfycbzyIJ0PxsiY3jlJvXMk-Bi3kYtjPSKoDYQKpad4sVpklp-zzHhzFXI7ywLu9KpZVF8U7g/exec';   // ใส่ URL ของ Apps Script (…/exec) ตรงนี้ หรือกรอกในช่อง "ตั้งค่า Google Drive" ด้านซ้าย
   const GDRIVE_LS_KEY = 'recheckDashboard_gdriveProxy_v1';
 
   function initGDrive(){
@@ -3693,6 +3869,7 @@ h1{letter-spacing:-.01em;}
   initControls();
   initUpload();
   initGDrive();
+  initPinSync();
   initSave();
   initFilterToggle();
   renderKPIs();
