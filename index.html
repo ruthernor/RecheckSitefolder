@@ -1382,6 +1382,9 @@ h1{letter-spacing:-.01em;}
 .insp-doc .id-st small, .ic-det .id-st small{color:var(--text-2);margin-left:4px;font-size:10.5px;}
 .insp-doc .id-st .id-tor, .ic-det .id-st .id-tor{margin:0 4px 0 0;color:var(--go);font-weight:600;font-size:10.5px;}
 .insp-doc .id-st:hover, .ic-det .id-st:hover{border-color:var(--focus);color:var(--text-0);}
+.cp-btn{font-family:inherit;font-size:11.5px;color:var(--text-1);background:var(--panel-2);border:1px solid var(--line);border-radius:999px;padding:2px 11px;cursor:pointer;white-space:nowrap;}
+.cp-btn:hover{border-color:var(--focus);color:var(--text-0);}
+.cp-btn.done{border-color:var(--go);color:var(--go);}
 .insp-issue-head .ih-sum{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 2px;font-weight:400;}
 .insp-issue-head .ih-sum > span{font-size:12px;border-radius:999px;padding:3px 13px;border:1px solid var(--line);color:var(--text-1);}
 .insp-issue-head .ih-sum b{margin:0 6px;font-size:15px;font-weight:700;}
@@ -3392,19 +3395,65 @@ h1{letter-spacing:-.01em;}
   }
 
   // ---------- สรุปการตรวจรับ ----------
+  // คัดลอกข้อความลงคลิปบอร์ด (มี fallback สำหรับกรณีเปิดจากไฟล์ในเครื่อง)
+  function copyText(text, btn){
+    const lbl = btn.dataset.lbl || btn.textContent;
+    btn.dataset.lbl = lbl;
+    const done = ()=>{
+      btn.textContent = '✓ คัดลอกแล้ว'; btn.classList.add('done');
+      clearTimeout(btn._cpT);
+      btn._cpT = setTimeout(()=>{ btn.textContent = lbl; btn.classList.remove('done'); }, 1600);
+    };
+    const fallback = ()=>{
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      let ok = false;
+      try{ ok = document.execCommand('copy'); }catch(e){}
+      document.body.removeChild(ta);
+      if(ok) done(); else alert('คัดลอกไม่สำเร็จ — กรุณาลองใหม่');
+    };
+    if(navigator.clipboard && window.isSecureContext){
+      navigator.clipboard.writeText(text).then(done, fallback);
+    }else fallback();
+  }
+  const CP_BTN = key => `<button type="button" class="cp-btn" data-cp="${escapeHtml(key)}" title="คัดลอก TOR, ชื่อสถานี, CM INDOOR ของรายการนี้">📋 คัดลอก</button>`;
+
   function renderInspection(list){
     const cm = st => (st.cmIndoor && String(st.cmIndoor).trim()) || '';
+    // จำว่า dropdown ไหนเปิดอยู่ (ไม่ให้พับเองเวลาข้อมูลรีเฟรช เช่น ซิงก์บอร์ดร่วม/เปลี่ยนตัวกรอง)
+    const openKeys = new Set(Array.from(document.querySelectorAll('#inspBlock details[open][data-k]')).map(d=>d.dataset.k));
+    const restoreOpen = ()=> document.querySelectorAll('#inspBlock details[data-k]').forEach(d=>{ if(openKeys.has(d.dataset.k)) d.open = true; });
+    // ข้อความที่คัดลอก: TOR / ชื่อสถานี / CM INDOOR คั่นด้วย Tab (วางลง Excel แยกคอลัมน์ได้เลย)
+    const cpTexts = {};
+    const torOf = st => (st.idx!==null && st.idx!==undefined) ? String(st.idx) : '';
+    const toCopy = arr => ['TOR\tชื่อสถานี\tCM INDOOR'].concat(arr.map(st=>[torOf(st), String(st.name||'-'), cm(st)].join('\t'))).join('\n');
+    const bindCopy = root => root.querySelectorAll('.cp-btn').forEach(b=>{
+      b.addEventListener('click', e=>{ e.preventDefault(); e.stopPropagation(); copyText(cpTexts[b.dataset.cp]||'', b); });
+    });
     const count = (pred) => list.filter(pred).length;
     const splitChips = (pred)=> `<div class="ic-split"><span>CCIV<b>${fmt(count(st=> pred(st) && cm(st)==='CCIV'))}</b></span><span>MHPM<b>${fmt(count(st=> pred(st) && cm(st)==='MHPM'))}</b></span></div>`;
+    const cardFlat = [];
     const cards = [
       {label:'ทปษ ตรวจแล้ว',   pred: st=> st.chk_tps===1},
       {label:'ทปษ ลงนามครบ',  pred: st=> st.sign_tps===1}
-    ].map(c=>{
-      const total = count(c.pred);
+    ].map((c,ci)=>{
+      const sts = list.filter(c.pred).sort((x,y)=> String(x.name).localeCompare(String(y.name),'th'));
+      const total = sts.length;
+      const key = 'c:' + ci;
+      cpTexts[key] = toCopy(sts);
       return `<div class="insp-card">
         <div class="ic-label">${c.label}</div>
         <div class="ic-num">${fmt(total)}<small>สถานี จาก ${fmt(list.length)}</small></div>
         ${splitChips(c.pred)}
+        <details class="ic-det" data-k="${key}">
+          <summary class="ic-subrow"><span class="ic-sublabel">รายชื่อสถานี · TOR · ชื่อสถานี · CM INDOOR</span>${total ? CP_BTN(key) : ''}</summary>
+          <div class="id-stations">${total ? sts.map(st=>{
+            cardFlat.push(st);
+            const t = torOf(st) || '-';
+            return `<button type="button" class="id-st" data-i="${cardFlat.length-1}" title="TOR ${escapeHtml(t)}"><small class="id-tor">TOR ${escapeHtml(t)}</small> ${escapeHtml(st.name||'-')}${cm(st)?` <small>${escapeHtml(cm(st))}</small>`:''}</button>`;
+          }).join('') : '<span class="ir-none" style="color:var(--text-2)">ไม่มีสถานี</span>'}</div>
+        </details>
       </div>`;
     }).join('');
     // Recheck site folder: ความครบถ้วนคำนวณจากเอกสาร 20 รายการ (TRUE / (TRUE+FALSE))
@@ -3415,16 +3464,18 @@ h1{letter-spacing:-.01em;}
     const recheckRows = [
       {label:'Recheck แล้ว รอตรวจ', note:'สถานีครบ 100% แต่ ทปษ ตรวจแล้ว = FALSE', pred: recheckWait},
       {label:'อยู่ระหว่าง Recheck', note:'สถานีน้อยกว่า 100% และ ทปษ ตรวจแล้ว = FALSE', pred: recheckDoing}
-    ].map(r=> Object.assign(r, {stations: list.filter(r.pred).sort(byName)}));
+    ].map((r,ri)=> Object.assign(r, {key:'r:'+ri, stations: list.filter(r.pred).sort(byName)}));
+    recheckRows.forEach(r=>{ cpTexts[r.key] = toCopy(r.stations); });
     const recheckFlat = [];
     const recheckCard = `<div class="insp-card insp-card-recheck">
         <div class="ic-label">Recheck site folder</div>
         ${recheckRows.map(r=>`
-        <details class="ic-det">
+        <details class="ic-det" data-k="${r.key}">
           <summary class="ic-subrow">
             <div class="ic-subhead"><span class="ic-sublabel">${r.label}</span><span class="ic-subnote">${r.note}</span></div>
             <div class="ic-subnum">${fmt(r.stations.length)}<small>สถานี</small></div>
             ${splitChips(r.pred)}
+            ${r.stations.length ? CP_BTN(r.key) : ''}
           </summary>
           <div class="id-stations">${r.stations.length ? r.stations.map(st=>{
             recheckFlat.push(st);
@@ -3438,6 +3489,11 @@ h1{letter-spacing:-.01em;}
     document.querySelectorAll('#inspRecheck .id-st').forEach(el=>{
       el.addEventListener('click', ()=> selectStation(recheckFlat[parseInt(el.dataset.i,10)]));
     });
+    document.querySelectorAll('#inspGrid .id-st').forEach(el=>{
+      el.addEventListener('click', ()=> selectStation(cardFlat[parseInt(el.dataset.i,10)]));
+    });
+    bindCopy(document.getElementById('inspGrid'));
+    bindCopy(document.getElementById('inspRecheck'));
     document.getElementById('inspScope').textContent = `(${fmt(list.length)} สถานีตามตัวกรอง)`;
 
     // ISSUE ตรวจแล้วไม่ผ่าน: ทปษ ตรวจแล้ว = TRUE และ ทปษ ลงนามครบ = FALSE
@@ -3459,6 +3515,7 @@ h1{letter-spacing:-.01em;}
     const wrap = document.getElementById('inspIssueList');
     if(issues.length===0){
       wrap.innerHTML = `<div class="st-list-empty">ไม่มีสถานีที่เข้าเงื่อนไข</div>`;
+      restoreOpen();
       return;
     }
     // จัดกลุ่มตามเอกสารที่ขาด (FALSE) -> รายชื่อสถานี
@@ -3474,17 +3531,20 @@ h1{letter-spacing:-.01em;}
     if(waitSignList.length) groups.push({name:'แก้ไขตาม Comment แล้ว รอ ทปษ เซ็น', stations:waitSignList, wait:true});
     const flat = [];
     wrap.innerHTML = groups.map(g=>{
+      const gkey = 'd:' + g.name;
+      cpTexts[gkey] = toCopy(g.stations);
       const chips = g.stations.map(st=>{
         flat.push(st);
         const tor = (st.idx!==null && st.idx!==undefined) ? 'TOR '+escapeHtml(String(st.idx)) : '';
         return `<button type="button" class="id-st" data-i="${flat.length-1}" title="${tor}"><small class="id-tor">TOR ${(st.idx!==null && st.idx!==undefined) ? escapeHtml(String(st.idx)) : '-'}</small> ${escapeHtml(st.name||'-')}${cm(st)?` <small>${escapeHtml(cm(st))}</small>`:''}</button>`;
       }).join('');
-      return `<details class="insp-doc${g.wait?' is-wait':''}">
+      return `<details class="insp-doc${g.wait?' is-wait':''}" data-k="${escapeHtml(gkey)}">
         <summary>
           <span class="id-label">${g.wait?'':'เอกสารที่ขาด'}</span>
           <span class="id-name">${escapeHtml(g.name)}</span>
           ${g.wait ? `<span class="id-split">${splitText(g.stations)}</span>` : ''}
           <span class="id-count">${fmt(g.stations.length)} สถานี</span>
+          ${CP_BTN(gkey)}
         </summary>
         <div class="id-stations">${chips}</div>
       </details>`;
@@ -3492,6 +3552,8 @@ h1{letter-spacing:-.01em;}
     wrap.querySelectorAll('.id-st').forEach(el=>{
       el.addEventListener('click', ()=> selectStation(flat[parseInt(el.dataset.i,10)]));
     });
+    bindCopy(wrap);
+    restoreOpen();
   }
 
   function renderBarChart(t,f){
